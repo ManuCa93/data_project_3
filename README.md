@@ -37,3 +37,12 @@ Known Data Quality Challenges
     Missing Values: Frequent missing data, particularly missing author IDs and missing organization (ORG) information.
     Entity Resolution: Author names can be spelled differently across entries (e.g., "Mitrovic" vs. "Mitrović").
     Temporal Inconsistencies: An author's affiliated organization can change over time, or be present in some years and missing in others.Categorization Errors: Incorrect document types, such as a paper from an international conference being incorrectly labeled as a "Journal" in the doc_type field.
+
+
+Follow up objectives:
+
+WOrk on the feauture stream
+Work on model stream
+Work from simple to more complicated
+Final network on citations
+Then use the final network for featurs itself 
