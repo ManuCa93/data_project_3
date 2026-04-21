@@ -239,3 +239,32 @@ Before continuing the notebook, remember:
 8. Train graph and pairwise models.
 9. Export outputs.
 
+## 10) Current Issues
+The notebook currently suffers from a bit of an "identity crisis" and contains a massive data leakage issue in the first half, which makes it feel aimless.
+
+Here is a breakdown of what is going well and what needs to be fixed to align with the checklist and common sense:
+
+1. Massive Data Leakage in Models 1 & 2
+The checklist explicitly states: "Target: for a pair of papers, predict if one will cite the other or not" and "keep the problem pair-based and avoid leakage from global popularity metrics."
+
+The Problem: The first half of the notebook (Feature Engineering, Correlation Analysis, Model 1 GCN, and Model 2 XGBoost) focuses on extracting node-level features that measure a paper's overall popularity (e.g., citation_per_year, impact_score, avg_author_citations, venue_median_citations).
+The Leak: When predicting if Paper A cites Paper B at the time Paper A is published, you cannot use Paper B's total citations up to 2024. Using impact_score or citation_per_year as features in the GCN and XGBoost models is a severe data leak. The model is just learning "highly cited papers are cited," which uses future information to predict a past event.
+2. Model 3 (Random Forest) Does It Right
+The Good: Model 3 correctly identifies the leakage problem! It pivoting to Pair-Level Features (Jaccard similarity of authors/keywords, temporal gap, etc.) without relying on any n_citation-derived metrics.
+The Disconnect: Because Model 3 is so disconnected from the first half of the notebook, the first half feels completely aimless. The notebook builds up all these SQL tables for impact scores and venue tiers, only to rightfully abandon them for the Random Forest.
+3. Disconnected Data Quality & Cleaning
+The Problem: The SQL Data Cleaning section does some genuinely good work (e.g., author canonicalization, resolving missing IDs, tracking affiliations). However, Model 3 doesn't use any of it.
+The Aimlessness: Instead of using the cleaned author_name_canonical SQL tables, the Random Forest section re-parses the raw Parquet columns using custom Python functions (extract_author_names, tokenize_text). All the hard work done in SQL to clean the data is effectively wasted because the final, valid model ignores it.
+4. Misaligned EDA
+The Problem: The EDA focuses on predicting single-paper popularity (e.g., "Top 15 Features Predicting Citation Count").
+How to Fix: To make the notebook cohesive, the EDA should explore pairs of papers. For example:
+What is the average age gap (year_gap) between a citing paper and a cited paper?
+How often do citing papers share the same venue?
+What is the distribution of author overlap among positive citation pairs vs. random non-citing pairs?
+Summary of How to Fix the Notebook
+To make this a high-quality, cohesive project that perfectly matches the checklist:
+
+Refocus the EDA: Shift the correlation analysis away from predicting n_citation. Instead, build the pair-level dataset early and do EDA on what makes a pair a citation link vs. a non-link.
+Fix or Remove Models 1 & 2: If you want to keep the GCN and XGBoost, you must remove leaking features (citation_per_year, impact_score, avg_author_citations, venue_median_citations). Replace them with leak-free node features (like title length, reference count, author count, etc.).
+Connect Data Cleaning to the Pipeline: Update the pair-level feature generation (currently in Python) to utilize the cleaned SQL tables (canonical authors, normalized text) you built in the first half.
+

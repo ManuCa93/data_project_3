@@ -19,3 +19,5 @@ top_cited_papers_features.parquet
 *.parquet
 
 .tmp/
+
+checklists.md
