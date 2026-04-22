@@ -21,3 +21,7 @@ top_cited_papers_features.parquet
 .tmp/
 
 checklists.md
+
+splits_gcn/
+
+model_splits
