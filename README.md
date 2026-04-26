@@ -244,8 +244,8 @@ Before continuing the notebook, remember:
 The workflow has now been split without removing anything from the original notebook:
 
 - [notebook.ipynb](notebook.ipynb): full original notebook, kept as the master reference
-- [notebook_part1_eda_cleaning_features.ipynb](notebook_part1_eda_cleaning_features.ipynb): EDA, cleaning, normalization, feature engineering
-- [notebook_part2_feature_selection.ipynb](notebook_part2_feature_selection.ipynb): pair-feature construction, feature selection, interpretability, auditing
+- [notebook_part1_eda_cleaning_features.ipynb](notebook_part1_eda_cleaning_features.ipynb): EDA and exploration
+- [notebook_part2_feature_selection.ipynb](notebook_part2_feature_selection.ipynb): data cleaning, feature engineering, correlation analysis, interpretability, export
 - [notebook_part3_modeling_link_prediction.ipynb](notebook_part3_modeling_link_prediction.ipynb): split construction, tabular baselines, pair-level modeling, graph appendix
 - [notebook_helpers.py](notebook_helpers.py): shared helper functions used by the split notebooks
 
