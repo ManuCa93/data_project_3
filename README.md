@@ -239,7 +239,17 @@ Before continuing the notebook, remember:
 8. Train graph and pairwise models.
 9. Export outputs.
 
-## 10) Current Issues — Remaining cleanup items
+## 10) Split notebook map
+
+The workflow has now been split without removing anything from the original notebook:
+
+- [notebook.ipynb](notebook.ipynb): full original notebook, kept as the master reference
+- [notebook_part1_eda_cleaning_features.ipynb](notebook_part1_eda_cleaning_features.ipynb): EDA, cleaning, normalization, feature engineering
+- [notebook_part2_feature_selection.ipynb](notebook_part2_feature_selection.ipynb): pair-feature construction, feature selection, interpretability, auditing
+- [notebook_part3_modeling_link_prediction.ipynb](notebook_part3_modeling_link_prediction.ipynb): split construction, tabular baselines, pair-level modeling, graph appendix
+- [notebook_helpers.py](notebook_helpers.py): shared helper functions used by the split notebooks
+
+## 11) Current Issues — Remaining cleanup items
 
 The major leakage paths have been addressed in the current code. What remains is mostly narrative, readability, and maintenance cleanup.
 
@@ -346,32 +356,37 @@ The flat-feature pipeline now excludes the leaky global-statistics columns corre
 - define one clear constant for node/flat exclusions near the data-loading section
 - reuse it everywhere the flat matrix is built
 
-### Issue 6: Temporal leakage in flat-feature scaler (CRITICAL)
+### Issue 6: Target-derived feature leakage in flat-feature engineering (CRITICAL)
 
-The flat-feature matrix construction (cell 98) uses `np.nan_to_num()` but does NOT apply a StandardScaler. More critically, when building the feature matrix, all nodes from train/val/test are normalized together without temporal separation.
+The current flat-feature matrix does not mainly leak through scaling; it leaks through the feature definitions themselves. Several node-level inputs are computed from citation counts, venue prestige, or author reputation statistics that are not available at citation-prediction time.
 
-**Code location:** Cell 98, lines 2019–2025:
-```python
-node_feats_full = all_df.select(feature_cols).to_numpy()
-node_feats_full = np.nan_to_num(node_feats_full, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
-node_feats_train = node_feats_full[:num_train_nodes]
-node_feats_val   = node_feats_full[:num_val_nodes]
-node_feats_test  = node_feats_full[:num_total_nodes]
-```
+**Code locations:**
+- author reputation features: [notebook.ipynb](notebook.ipynb#L886-L904)
+- quality features: [notebook.ipynb](notebook.ipynb#L1590-L1708)
+- flat feature export / selection: [notebook.ipynb](notebook.ipynb#L1746-L1773)
+
+**Examples of risky features:**
+- `avg_author_citations`
+- `max_author_citations`
+- `citation_per_year`
+- `impact_score`
+- `venue_median_citations`
+- `is_top_venue`
+- `venue_tier`
 
 **Impact:**
-- test node statistics leak into the train/val feature normalization
-- although individual leaky columns are excluded, the feature scale itself encodes future information
-- makes cross-validation and test evaluation invalid
+- the model can learn from post-publication popularity signals instead of publication-time metadata
+- performance becomes inflated and less meaningful for true link prediction
+- even with temporal filters like `year <= 2020`, the features may still encode future citation knowledge
 
 **Suggested fix:**
-- compute feature mean/std ONLY on train nodes
-- apply the train-fitted scaler to val and test separately
-- this matches the practice used in the graph pipeline (cell 87)
+- keep these features only in a clearly separated "analysis-only" branch, if at all
+- for the link-prediction baseline, rebuild the flat matrix from publication-time-safe metadata only
+- make the allowed feature list explicit and document why each feature is safe
 
 ### Issue 7: Non-stratified pair sampling across train/val/test (MODERATE)
 
-Pair-level features (cell 119) subsample pairs randomly without ensuring temporal or edge boundaries. The same source paper can appear in both train and test subsets.
+Pair-level features subsample pairs randomly inside each split. The split boundaries exist, but the same source paper can still appear across train/val/test because the sampling is not group-aware.
 
 **Code location:** Cell 119, lines 2857–2897:
 ```python
@@ -380,14 +395,14 @@ neg_idx = np.random.choice(len(neg_src), n_neg, replace=False)
 ```
 
 **Impact:**
-- train and test edge indices may overlap or share source nodes
-- evaluation metrics become unreliable because the model has seen similar examples during training
-- the pair-level evaluation contradicts the temporal split principle
+- train and test can share source papers or nearby citations
+- evaluation may be slightly optimistic if the same paper-level context repeats across splits
+- the current protocol is better described as split-consistent sampling, not strict group separation
 
 **Suggested fix:**
-- ensure that each pair (src, dst) is assigned to exactly one split (train/val/test)
-- either stratify by source node year or pre-assign pairs before subsampling
-- verify no overlap between splits before training
+- if strict independence is required, enforce group-aware splitting by source paper or publication year
+- otherwise, document that the split is edge-based and not group-exclusive
+- add an overlap check before training
 
 ### Issue 8: Inconsistent dataset sizes across experimental phases (MODERATE)
 
