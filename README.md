@@ -239,54 +239,217 @@ Before continuing the notebook, remember:
 8. Train graph and pairwise models.
 9. Export outputs.
 
-## 10) Current Issues — Forensic Audit (Updated)
+## 10) Current Issues — Remaining cleanup items
 
-This section contains an evidence-based audit of the structural, conceptual, and data leakage issues currently present in the notebook.
+The major leakage paths have been addressed in the current code. What remains is mostly narrative, readability, and maintenance cleanup.
 
-### Issue 1: Data Leakage via Global Statistics
+### Issue 0: Experimental design still needs a final rewrite
 
-**Problem:** Several features in the notebook are computed as aggregates over the *entire* dataset (including papers up to 2024). While some numeric features (`venue_median_citations`, `avg_author_citations`) are correctly dropped via the `leaky_features` list before training LGBM/XGB, the `is_top_venue` and `venue_tier` features are **not dropped**. 
-**Impact:** Because these features rely on future prestige (median citations across all time), the 2020 training set has access to information about which venues will be popular in 2024. This leaks future knowledge directly into the training data.
+The notebook still does not present a fully clean final design for the tabular experiments. The flat-feature phase and the pair-level phase exist, but the model comparison story is still not fully settled.
 
-### Issue 2: Temporal Leakage in Negative Sampling (LGBM / XGBoost)
+**Impact:**
+- the narrative does not yet read like a deliberate experiment plan
+- it is unclear which models are the final baseline set versus temporary tests
+- the notebook still mixes "strongest performance" with "model diversity" goals
 
-**Problem:** The `sample_negatives_fast` function generates fake citation pairs by picking a random source node and a random destination node within the temporal split. However, it **does not enforce that the source paper is published after or in the same year as the destination paper (`src_year >= dst_year`)**. 
-**Impact:** A real paper cannot cite a paper published after it. By generating temporally impossible pairs (e.g., a 2010 paper citing a 2018 paper) and keeping features like `decade` and `is_recent`, the LGBM/XGB models can trivially identify fake pairs simply by noting that `src_year < dst_year`. This makes the classification task artificially easy for half the dataset and falsely inflates ROC-AUC and PR-AUC.
+**Suggested fix:**
+- define a final tabular ladder explicitly before the results section
+- keep one simple baseline, one strong tree baseline, and one genuinely different model family
+- separate the graph-native GCN from the tabular ladder as its own phase
 
-### Issue 3: Unnecessary Dropping of Valid Features
+### Issue 1: Redundant model choices in the flat-feature phase
 
-**Problem:** The `leaky_features` list drops `years_since_publication` and `n_references`. 
-**Impact:** `n_references` is the count of *outgoing* references from the source paper. This is strictly known at the exact moment of publication and is perfectly valid for prediction. Dropping it discards a highly predictive and completely legitimate feature.
+The current flat-feature setup still uses several very similar tree ensembles. In practice, `LGBMClassifier` and `XGBClassifier` are highly redundant, and a second tree ensemble on top of them adds limited diversity.
 
-### Issue 4: Conceptual Disconnect (Concatenated Nodes vs. Pair Features)
+**Impact:**
+- the model comparison is less informative than it should be
+- the notebook is missing a clearly distinct baseline family
+- the final results may look stronger than the real diversity of the approach
 
-**Problem:** For the Link Prediction task (does A cite B?):
-- **LGBM and XGBoost** are trained by simply concatenating 25 flat features from Paper A and 25 flat features from Paper B. Tree-based models are historically very poor at inferring pairwise interactions (like Jaccard similarity or exact venue matches) from flat concatenated arrays.
-- **Random Forest** is trained using explicitly engineered pair-level features (`year_gap`, `author_jaccard`, `same_venue`).
-**Impact:** LGBM/XGB are fundamentally handicapped conceptually compared to the Random Forest, making any comparison between them structurally flawed. A proper tabular baseline for link prediction should compute explicit pairwise similarities for *all* tree models.
+**Suggested fix:**
+- keep only one of the two boosting models (`LGBMClassifier` or `XGBClassifier`)
+- replace the redundant slot with a more diverse model such as:
+    - `LogisticRegression` as a clean linear baseline, or
+    - `MLPClassifier` if you want a genuinely different nonlinear family and are willing to standardize inputs carefully
 
-### Issue 5: Unfair Model Comparison and Inconsistent Splits
+**Practical recommendation:**
+- for the notebook narrative, the most useful trio is usually:
+    1. `LogisticRegression`
+    2. `RandomForestClassifier` or `ExtraTreesClassifier`
+    3. `LGBMClassifier`
+- keep `XGBClassifier` only if you explicitly want a head-to-head booster comparison, not if diversity is the priority.
 
-**Problem:** The project checklist strictly requires a "fair comparison" between models. Currently:
-- **LGBM/XGBoost** are trained on ~3.2M pairs using a strict and correct **temporal split** (Train $\le$ 2020, Test $\ge$ 2023).
-- **Random Forest** is trained on exactly 10,000 pairs using a **random split** (`train_test_split` with 80/20 proportion). 
-**Impact:** The Random Forest suffers from severe temporal leakage because a random split allows future pairs (e.g., from 2023) to leak into the training set, giving the model access to future citation behavior. Because the datasets, features, and split strategies are entirely different, it is impossible to compare these models fairly.
+### Issue 1: Legacy experimental code is still embedded
 
-### Proposed Experimental Design (Flat vs. Pair Features)
+The notebook still contains large commented-out blocks for older experiments, especially around the graph pipeline and the original XGBoost path.
 
-To completely resolve the conceptual disconnect (Issue 4) and provide a bulletproof "fair comparison" (Issue 5), we propose a two-phase modeling approach:
-1. **Phase 1 (Flat Features):** Train all three models (LGBM, XGBoost, Random Forest) using only the concatenated flat node features.
-2. **Phase 2 (Pair Features):** Train all three models using exclusively explicitly engineered pair-level features (e.g., Jaccard similarities, year gaps).
+**Impact:**
+- harder to see which code is authoritative
+- more difficult to follow the execution order
+- the notebook feels like a history of attempts rather than a final report
 
-**Why this works:** This design explicitly tests and proves a major machine learning concept—that tree-based models struggle to infer relationships from flat arrays but excel when given explicit relationship features. For this to be valid, all models in both phases must use the exact same strict temporal split, the exact same subset of data, and the exact same time-respecting negative sampling.
+**Suggested fix:**
+- delete dead code that is no longer needed
+- move historical attempts to an appendix notebook or a separate text file
 
-### Recommended Fixes (Priority Order)
+### Issue 2: Section titles and model labels are inconsistent
 
-1. **Fix Negative Sampling & Filtering:** Update `sample_negatives_fast` to strictly enforce `src_year >= dst_year` for all generated fake pairs. Furthermore, abandon purely random sampling across the entire 6.7M dataset to prevent trivially easy fake pairs. Use one of these strategies instead:
-    *   **Domain/Venue Filtering:** Filter the dataset to a specific domain (e.g., top CS venues) *before* creating edges or sampling.
-    *   **Snowball / Subgraph Sampling:** Pick a seed set of related papers and extract all papers 1-hop away in the citation graph to create a dense, connected neighborhood.
-    *   **Hard Negative Sampling:** Force the negative generator to pick a paper from the *same year* or *same venue* as the true citation, but which wasn't actually cited, to force the model to learn subtle boundaries.
-2. **Implement the 2-Phase Experimental Design:** Train all 3 models on the flat features, then train all 3 on the explicit pair-level dataset.
-3. **Unify Splits (Temporal for All):** Remove the random `train_test_split` from the Random Forest pipeline. Enforce the `Train <= 2020`, `Val 2021-2022`, `Test >= 2023` temporal split strictly across all three models.
-4. **Fix Global Statistics Leakage:** Explicitly drop `is_top_venue` and `venue_tier` from the training features, or calculate them *only* using citations accrued up to the year 2020.
-5. **Restore Valid Features:** Remove `n_references` and `years_since_publication` from the `leaky_features` drop list.
+Some headings still describe the wrong granularity or the wrong role of a model, for example using "pair" language for cells that are actually flat-feature tabular models.
+
+**Impact:**
+- the narrative is harder to follow
+- readers may think a model is pair-level when it is actually node/flat-level
+
+**Suggested fix:**
+- rename sections to something explicit like:
+    - Flat tabular baselines
+    - Pair-level baseline
+    - Graph-native model
+- keep numbering consistent across the three model blocks
+
+### Issue 3: The notebook is doing too many jobs in one flow
+
+EDA, missing-data analysis, entity resolution, feature engineering, graph construction, flat-model training, pair-model training, and interpretation are all interleaved in one long notebook.
+
+**Impact:**
+- readability drops
+- execution order becomes fragile
+- it is harder to explain the notebook as a coherent story
+
+**Suggested fix:**
+- split into two notebooks if possible:
+    1. EDA + cleaning + feature engineering
+    2. modeling + interpretation
+- if keeping one notebook, add a short table of contents and stronger section separators
+
+### Issue 4: Outputs need a final refresh
+
+Some cells still show outputs from earlier runs and earlier versions of the code.
+
+**Impact:**
+- old outputs can contradict the current code
+- readers may trust stale permutation-importance or error outputs
+
+**Suggested fix:**
+- rerun from the flat feature-construction cell onward
+- clear obsolete outputs before the final handoff
+
+### Issue 5: Leakage policy should be centralized
+
+The flat-feature pipeline now excludes the leaky global-statistics columns correctly, but the exclusion policy is still spread across multiple cells.
+
+**Impact:**
+- future edits can accidentally reintroduce leakage
+- the notebook is harder to maintain
+
+**Suggested fix:**
+- define one clear constant for node/flat exclusions near the data-loading section
+- reuse it everywhere the flat matrix is built
+
+### Issue 6: Temporal leakage in flat-feature scaler (CRITICAL)
+
+The flat-feature matrix construction (cell 98) uses `np.nan_to_num()` but does NOT apply a StandardScaler. More critically, when building the feature matrix, all nodes from train/val/test are normalized together without temporal separation.
+
+**Code location:** Cell 98, lines 2019–2025:
+```python
+node_feats_full = all_df.select(feature_cols).to_numpy()
+node_feats_full = np.nan_to_num(node_feats_full, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
+node_feats_train = node_feats_full[:num_train_nodes]
+node_feats_val   = node_feats_full[:num_val_nodes]
+node_feats_test  = node_feats_full[:num_total_nodes]
+```
+
+**Impact:**
+- test node statistics leak into the train/val feature normalization
+- although individual leaky columns are excluded, the feature scale itself encodes future information
+- makes cross-validation and test evaluation invalid
+
+**Suggested fix:**
+- compute feature mean/std ONLY on train nodes
+- apply the train-fitted scaler to val and test separately
+- this matches the practice used in the graph pipeline (cell 87)
+
+### Issue 7: Non-stratified pair sampling across train/val/test (MODERATE)
+
+Pair-level features (cell 119) subsample pairs randomly without ensuring temporal or edge boundaries. The same source paper can appear in both train and test subsets.
+
+**Code location:** Cell 119, lines 2857–2897:
+```python
+pos_idx = np.random.choice(len(pos_src), n_pos, replace=False)
+neg_idx = np.random.choice(len(neg_src), n_neg, replace=False)
+```
+
+**Impact:**
+- train and test edge indices may overlap or share source nodes
+- evaluation metrics become unreliable because the model has seen similar examples during training
+- the pair-level evaluation contradicts the temporal split principle
+
+**Suggested fix:**
+- ensure that each pair (src, dst) is assigned to exactly one split (train/val/test)
+- either stratify by source node year or pre-assign pairs before subsampling
+- verify no overlap between splits before training
+
+### Issue 8: Inconsistent dataset sizes across experimental phases (MODERATE)
+
+The three modeling phases use radically different dataset sizes, making fair comparison impossible.
+
+**Impact:**
+- **Phase 1 (Flat features):** ~1.5M train pairs (FRACTION_TRAIN=0.05)
+- **Phase 2 (Pair-level RF):** only 5k train pairs randomly sampled from Phase 1
+- **Phase 3 (GCN):** uses full original graph
+- model performance differences may be due to dataset size, not model quality
+- impossible to isolate model family contribution from data volume effect
+
+**Suggested fix:**
+- either use the same pair counts across all tabular phases (flat + pair-level)
+- or explicitly document why phases use different scales
+- rerun all three phases on the same ~100k pair sample for a fair head-to-head comparison
+
+### Issue 9: Poor documentation of feature exclusion policy (MODERATE)
+
+The `leaky_features` list is defined at cell 94 (lines 1900–1912), but then referenced via `.getattr(globals(), 'leaky_features', [])` at cell 95 (line 2677). This is fragile and error-prone.
+
+**Code location:**
+- Cell 94: list definition
+- Cell 95, line 2677: unsafe retrieval via globals()
+- Cell 98, line 2967: uses the list
+
+**Impact:**
+- future maintainers may not realize that `leaky_features` must be defined before cell 95
+- if cells are reordered or re-executed out of order, features silently reintroduce leakage
+- no single source of truth for the exclusion policy
+- pair-level feature engineering (cells 119–121) never explicitly documents which node signals are forbidden
+
+**Suggested fix:**
+- define `LEAKY_FEATURES` as a module-level constant in an early setup cell (after data loading, before feature engineering)
+- document the rationale for each excluded feature in a clear comment
+- verify at each use site that the exclusion list was applied
+- explicitly document which pair-level features are derived only from publication-time metadata
+
+### Issue 10: Permutation importance is completely disabled (MINOR)
+
+Cell 110 (lines 2691–2720) has the entire permutation importance block commented out, with no explanation in surrounding markdown.
+
+**Impact:**
+- no feature importance analysis for the flat-feature Random Forest
+- readers cannot see which pair-level signals drive citations
+- interpretation is incomplete
+
+**Suggested fix:**
+- either delete the commented code if it's truly obsolete
+- or uncomment, document why it was disabled, and schedule it to run at the end (it takes ~80 min)
+- provide a markdown cell explaining the choice
+
+### Issue 11: Large commented-out historical code blocks (MINOR)
+
+Cell 105 (lines 2428–2520) contains 90+ lines of commented "ORIGINALE" XGBoost code. Similar commented blocks exist elsewhere.
+
+**Impact:**
+- clutters the notebook
+- confuses readers about which code is authoritative
+- makes diffs harder to read during version control
+
+**Suggested fix:**
+- delete all commented historical code blocks
+- if historical versions are important, save them to a separate file or commit to git history
+- keep only active, running code in the main notebook
