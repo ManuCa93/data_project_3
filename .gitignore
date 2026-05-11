@@ -11,3 +11,17 @@ __pycache__/
 project.duckdb
 
 project.duckdb.wal
+
+papers_with_features.parquet
+
+top_cited_papers_features.parquet
+
+*.parquet
+
+.tmp/
+
+checklists.md
+
+splits_gcn/
+
+model_splits
